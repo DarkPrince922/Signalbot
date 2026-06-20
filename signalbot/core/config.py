@@ -58,6 +58,27 @@ class EngineConfig(BaseModel):
     poll_offset_seconds: int = 15
 
 
+class AnalysisConfig(BaseModel):
+    """Settings for the on-demand market scan / 'where to enter now' feature."""
+
+    timeframe: str = "1h"
+    fast_ema: int = 20
+    slow_ema: int = 50
+    rsi_period: int = 14
+    atr_period: int = 14
+    atr_mult: float = 2.0
+    rr: float = 2.0
+    supertrend_period: int = 10
+    supertrend_mult: float = 3.0
+    # ATR-as-%-of-price thresholds that split volatility into LOW/MED/HIGH
+    vol_low_pct: float = 1.0
+    vol_high_pct: float = 2.5
+    # size scaling applied by risk level (bot 'determines risk')
+    size_factor_low: float = 1.0
+    size_factor_medium: float = 0.6
+    size_factor_high: float = 0.3
+
+
 class LoggingConfig(BaseModel):
     level: str = "INFO"
     file: str = "./logs/signalbot.log"
@@ -72,6 +93,7 @@ class AppConfig(BaseModel):
     backtest: BacktestConfig = Field(default_factory=BacktestConfig)
     tracker: TrackerConfig = Field(default_factory=TrackerConfig)
     engine: EngineConfig = Field(default_factory=EngineConfig)
+    analysis: AnalysisConfig = Field(default_factory=AnalysisConfig)
     logging: LoggingConfig = Field(default_factory=LoggingConfig)
 
     # populated after load, not from yaml

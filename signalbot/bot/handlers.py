@@ -7,19 +7,22 @@ from datetime import datetime, timezone
 
 from aiogram import F, Router
 from aiogram.filters import Command, CommandObject
-from aiogram.types import BufferedInputFile, Message
+from aiogram.types import BufferedInputFile, CallbackQuery, Message
 from sqlalchemy import desc, select
 
 from ..core.config import AppConfig
 from ..core.db import Database
 from ..core.models import SignalRow
+from ..core.types import Signal, SignalDirection, utcnow
 from ..data.provider import DataProvider, timeframe_ms
+from ..engine.analyzer import Analysis, Analyzer
 from ..engine.backtester import Backtester
 from ..engine.live_engine import LiveEngine
 from ..engine.plotting import equity_curve_png
 from ..engine.tracker import Tracker
 from ..strategies.registry import build_strategy, discover_strategies
-from .formatters import format_backtest, format_metrics, format_signal
+from . import keyboards as kb
+from .formatters import format_analysis, format_backtest, format_metrics, format_signal
 
 log = logging.getLogger(__name__)
 
@@ -31,6 +34,7 @@ class BotContext:
     provider: DataProvider
     engine: LiveEngine
     tracker: Tracker
+    analyzer: Analyzer
 
 
 HELP_TEXT = (
@@ -42,7 +46,9 @@ HELP_TEXT = (
     "/stats [strategy] [live|backtest] — метрики (по умолчанию live)\n"
     "/backtest <strategy> <pair> <tf> <from> <to> — прогон + equity curve\n"
     "/last [N] — последние сигналы\n"
-    "/open — открытые отслеживаемые сигналы\n\n"
+    "/open — открытые отслеживаемые сигналы\n"
+    "/menu — кнопки управления\n"
+    "/scan [tf] — проанализировать рынок прямо сейчас\n\n"
     "⚠️ Это анализ, а не финансовый совет."
 )
 
@@ -56,10 +62,18 @@ def build_router(ctx: BotContext) -> Router:
         # silently ignore anyone who is not the whitelisted user
         log.info("Ignored message from non-whitelisted user %s", message.from_user.id)
 
+    @router.callback_query(F.from_user.id != allowed_id)
+    async def reject_cb(cb: CallbackQuery) -> None:
+        await cb.answer("Доступ запрещён", show_alert=False)
+
     @router.message(Command("start"))
     @router.message(Command("help"))
     async def cmd_help(message: Message) -> None:
-        await message.answer(HELP_TEXT)
+        await message.answer(HELP_TEXT, reply_markup=kb.main_menu())
+
+    @router.message(Command("menu"))
+    async def cmd_menu(message: Message) -> None:
+        await message.answer("Меню управления:", reply_markup=kb.main_menu())
 
     @router.message(Command("signals"))
     async def cmd_signals(message: Message, command: CommandObject) -> None:
@@ -223,4 +237,122 @@ def build_router(ctx: BotContext) -> Router:
             caption="Equity curve (пунктир = граница IS/OOS)",
         )
 
+    # ---------------- Analysis / "where to enter now" ----------------
+
+    async def _do_scan() -> tuple[str, list[Analysis]]:
+        pairs = ctx.engine.pairs()
+        tf = ctx.config.analysis.timeframe
+        analyses = ctx.analyzer.scan(pairs, tf)
+        actionable = [a for a in analyses if a.is_actionable]
+        header = (
+            f"🔎 Анализ {tf} · {len(pairs)} пар · с перевесом: {len(actionable)}\n"
+            "Выбери пару, чтобы увидеть план и риск:"
+        )
+        return header, analyses
+
+    @router.message(Command("scan"))
+    async def cmd_scan(message: Message, command: CommandObject) -> None:
+        tf = (command.args or "").strip() or None
+        if tf:
+            ctx.config.analysis.timeframe = tf
+        await message.answer("⏳ Анализирую рынок...")
+        header, analyses = await _do_scan()
+        if not analyses:
+            await message.answer("Нет данных для анализа.")
+            return
+        await message.answer(header, reply_markup=kb.scan_results(analyses))
+
+    @router.callback_query(F.data == kb.CB_MENU)
+    async def cb_menu(cb: CallbackQuery) -> None:
+        await cb.message.edit_text("Меню управления:", reply_markup=kb.main_menu())
+        await cb.answer()
+
+    @router.callback_query(F.data == kb.CB_SCAN)
+    async def cb_scan(cb: CallbackQuery) -> None:
+        await cb.answer("Анализирую...")
+        header, analyses = await _do_scan()
+        if not analyses:
+            await cb.message.edit_text("Нет данных для анализа.", reply_markup=kb.main_menu())
+            return
+        await cb.message.edit_text(header, reply_markup=kb.scan_results(analyses))
+
+    @router.callback_query(F.data == kb.CB_OPEN)
+    async def cb_open(cb: CallbackQuery) -> None:
+        with ctx.db.session() as s:
+            rows = s.execute(
+                select(SignalRow).where(SignalRow.status == "OPEN").order_by(SignalRow.created_at)
+            ).scalars().all()
+        if not rows:
+            text = "Открытых сигналов нет."
+        else:
+            text = "Открытые сигналы:\n" + "\n".join(
+                f"#{r.id} {r.direction} {r.symbol} {r.strategy} вход {r.entry}" for r in rows
+            )
+        await cb.message.edit_text(text, reply_markup=kb.main_menu())
+        await cb.answer()
+
+    @router.callback_query(F.data == kb.CB_STATS)
+    async def cb_stats(cb: CallbackQuery) -> None:
+        m = ctx.tracker.live_metrics()
+        await cb.message.edit_text(
+            format_metrics(m, "📈 Live stats (все стратегии)"), reply_markup=kb.main_menu()
+        )
+        await cb.answer()
+
+    @router.callback_query(F.data == kb.CB_STRATS)
+    async def cb_strats(cb: CallbackQuery) -> None:
+        available = discover_strategies()
+        overrides = ctx.db.get_setting("strategy_enabled", {}) or {}
+        lines = ["Стратегии:"]
+        for name in sorted(available):
+            sc = ctx.config.strategies.get(name)
+            enabled = overrides.get(name, sc.enabled if sc else False)
+            lines.append(f"{'✅' if enabled else '⛔'} {name}")
+        await cb.message.edit_text("\n".join(lines), reply_markup=kb.main_menu())
+        await cb.answer()
+
+    @router.callback_query(F.data.startswith(f"{kb.CB_PICK}:"))
+    async def cb_pick(cb: CallbackQuery) -> None:
+        _, symbol, tf = cb.data.split(":", 2)
+        await cb.answer("Считаю план и риск...")
+        analysis = ctx.analyzer.analyze_pair(symbol, tf)
+        await cb.message.edit_text(
+            format_analysis(analysis, ctx.config),
+            reply_markup=kb.analysis_actions(analysis),
+        )
+
+    @router.callback_query(F.data.startswith(f"{kb.CB_TRACK}:"))
+    async def cb_track(cb: CallbackQuery) -> None:
+        _, symbol, tf = cb.data.split(":", 2)
+        analysis = ctx.analyzer.analyze_pair(symbol, tf)
+        if not analysis.is_actionable:
+            await cb.answer("Сейчас нет перевеса — нечего отслеживать.", show_alert=True)
+            return
+        sig = _analysis_to_signal(analysis)
+        if ctx.engine._persist_if_new(sig):
+            await cb.answer("✅ Добавлено в отслеживание")
+            await cb.message.edit_text(
+                format_analysis(analysis, ctx.config) + "\n\n✅ Сигнал отслеживается трекером.",
+                reply_markup=kb.main_menu(),
+            )
+        else:
+            await cb.answer("Уже отслеживается", show_alert=True)
+
     return router
+
+
+def _analysis_to_signal(a: Analysis) -> Signal:
+    """Turn a chosen analysis into a virtual signal for the forward tracker."""
+    return Signal(
+        symbol=a.symbol,
+        timeframe=a.timeframe,
+        direction=a.direction,
+        entry=a.entry,
+        stop_loss=a.stop_loss,
+        take_profits=a.take_profits,
+        strategy="manual_analysis",
+        reason=f"Ручной выбор по анализу (риск {a.risk_level}, score {int(a.score * 100)}%)",
+        confidence=a.score,
+        created_at=utcnow(),
+        meta={"risk_level": a.risk_level, "atr_pct": a.atr_pct},
+    )
