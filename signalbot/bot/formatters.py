@@ -3,8 +3,17 @@ from __future__ import annotations
 
 from ..core.config import AppConfig
 from ..core.types import Signal, SignalDirection
+from ..engine.analyzer import Analysis
 from ..engine.backtester import BacktestResult
 from ..engine.metrics import Metrics
+
+_RISK_LABEL = {"LOW": "🟩 НИЗКИЙ", "MEDIUM": "🟨 СРЕДНИЙ", "HIGH": "🟥 ВЫСОКИЙ", "—": "—"}
+_VOTE_LABEL = {
+    "ema_trend": "Тренд EMA",
+    "macd": "MACD",
+    "rsi": "RSI",
+    "supertrend": "Supertrend",
+}
 
 
 def _fmt_price(p: float) -> str:
@@ -80,3 +89,44 @@ def format_backtest(result: BacktestResult) -> str:
         "⚠️ Хороший бэктест ≠ будущая прибыль. Смотри форвард-трекер.",
     ]
     return "\n".join(parts)
+
+
+def format_analysis(a: Analysis, config: AppConfig) -> str:
+    if a.direction is None:
+        votes = ", ".join(
+            f"{_VOTE_LABEL.get(k, k)}:{'+' if v > 0 else ('-' if v < 0 else '0')}"
+            for k, v in a.votes.items()
+        )
+        return (
+            f"⚪ {a.symbol} ({a.timeframe}) — нет чёткого перевеса, лучше подождать.\n"
+            f"Индикаторы: {votes or 'n/a'}\n"
+            f"Волатильность (ATR): {a.atr_pct:.2f}% от цены"
+        )
+
+    arrow = "🟢 LONG" if a.direction == SignalDirection.LONG else "🔴 SHORT"
+    stop_pct = (a.stop_loss - a.entry) / a.entry * 100.0
+    tps = " / ".join(_fmt_price(t) for t in a.take_profits)
+    base = a.symbol.split("/")[0]
+    agree = ", ".join(
+        f"{_VOTE_LABEL.get(k, k)} {'↑' if v > 0 else ('↓' if v < 0 else '·')}"
+        for k, v in a.votes.items()
+    )
+    lines = [
+        f"{arrow}  {a.symbol}  ({a.timeframe})  — анализ сейчас",
+        f"Согласованность сигналов: {int(a.score * 100)}%",
+        f"Индикаторы: {agree}",
+        "",
+        f"Вход:   {_fmt_price(a.entry)}",
+        f"Стоп:   {_fmt_price(a.stop_loss)}  ({stop_pct:+.1f}%)",
+        f"Тейк:   {tps}",
+        f"R:R:    1 : {a.rr:.1f}" if a.rr else "R:R:    n/a",
+        "",
+        f"⚖️ Риск сделки: {_RISK_LABEL[a.risk_level]}",
+        f"Волатильность (ATR): {a.atr_pct:.2f}% от цены",
+        f"Рекоменд. риск: {a.suggested_risk_pct:.2f}% "
+        f"(база {config.account.risk_per_trade_pct:.1f}%, скорректировано по риску)",
+        f"Размер: {a.qty:.4f} {base}  (≈ {a.risk_usdt:.1f} USDT под риском)",
+        "",
+        "⚠️ Это подсказка, не финансовый совет. Исполняешь сам.",
+    ]
+    return "\n".join(lines)

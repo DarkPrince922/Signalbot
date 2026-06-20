@@ -13,6 +13,7 @@ from apscheduler.triggers.cron import CronTrigger
 from ..core.config import AppConfig, load_config
 from ..core.db import Database
 from ..data.ccxt_provider import CCXTProvider
+from ..engine.analyzer import Analyzer
 from ..engine.live_engine import LiveEngine
 from ..engine.tracker import Tracker
 from .formatters import format_signal
@@ -68,10 +69,13 @@ async def run() -> None:
     provider = CCXTProvider(config.data.exchange_id, db=db)
     engine = LiveEngine(config, db, provider)
     tracker = Tracker(config, db, provider)
+    analyzer = Analyzer(config, provider, tracker)
 
     bot = Bot(token=config.secrets.telegram_bot_token)
     dp = Dispatcher()
-    ctx = BotContext(config=config, db=db, provider=provider, engine=engine, tracker=tracker)
+    ctx = BotContext(
+        config=config, db=db, provider=provider, engine=engine, tracker=tracker, analyzer=analyzer
+    )
     dp.include_router(build_router(ctx))
 
     async def notify(signal) -> None:
