@@ -1,0 +1,46 @@
+data:
+  exchange_id: binanceusdm
+  cache_dir: ./data_cache
+
+account:
+  size_usdt: 1000
+  risk_per_trade_pct: 1.0
+
+costs:
+  taker_fee_bps: 5
+  maker_fee_bps: 2
+  slippage_bps: 2
+  include_funding: false
+  funding_rate_bps_per_8h: 1.0
+
+pairs: [BTC/USDT, ETH/USDT, SOL/USDT]
+
+strategies:
+  ema_cross:
+    enabled: true
+    timeframe: 1h
+    params: {fast: 20, slow: 50, atr_period: 14, atr_mult: 2.0, rr: 2.0}
+  rsi_reversion:
+    enabled: true
+    timeframe: 1h
+    params: {rsi_period: 14, oversold: 30, overbought: 70, trend_ema: 200, rr: 1.5}
+  donchian_breakout:
+    enabled: false
+    timeframe: 4h
+    params: {channel: 20, atr_period: 14, atr_mult: 3.0, rr: 2.0}
+
+backtest:
+  oos_split: 0.7
+  fill_mode: next_open       # next_open | close
+  warmup: 250
+  max_concurrent_per_pair: 1
+
+tracker:
+  expire_after_bars: 48
+
+engine:
+  poll_offset_seconds: 15     # how long after candle close to poll
+
+logging:
+  level: INFO
+  file: ./logs/signalbot.log

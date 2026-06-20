@@ -1,0 +1,11 @@
+aiogram>=3.4,<4.0
+ccxt>=4.2
+pandas>=2.1
+numpy>=1.26,<2.0
+SQLAlchemy>=2.0
+APScheduler>=3.10
+pydantic>=2.6
+pydantic-settings>=2.2
+PyYAML>=6.0
+matplotlib>=3.8
+python-dotenv>=1.0

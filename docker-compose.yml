@@ -1,0 +1,13 @@
+services:
+  signalbot:
+    build: .
+    container_name: signalbot
+    restart: unless-stopped
+    env_file:
+      - .env
+    volumes:
+      - ./data_cache:/app/data_cache
+      - ./logs:/app/logs
+      - ./signalbot.db:/app/signalbot.db
+      - ./config.yaml:/app/config.yaml:ro
+    command: ["python", "-m", "signalbot.bot.main"]
