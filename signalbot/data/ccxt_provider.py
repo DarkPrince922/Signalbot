@@ -41,6 +41,38 @@ class CCXTProvider(DataProvider):
         self.db = db
         self.max_retries = max_retries
         self.request_pause = request_pause
+        self._markets_loaded = False
+        self._symbol_cache: dict[str, str] = {}
+
+    def _resolve_symbol(self, symbol: str) -> str:
+        """Map a user symbol to one the exchange actually lists.
+
+        On USDⓈ-M futures venues (e.g. binanceusdm) ccxt uses the linear-swap
+        notation BASE/QUOTE:QUOTE — so ``BTC/USDT`` must become ``BTC/USDT:USDT``.
+        We load markets once and pick the matching form; if markets can't be
+        loaded (offline), we fall back to the symbol as given.
+        """
+        if symbol in self._symbol_cache:
+            return self._symbol_cache[symbol]
+        if not self._markets_loaded:
+            try:
+                self._with_retry(self.exchange.load_markets)
+                self._markets_loaded = True
+            except Exception as exc:
+                log.warning("load_markets failed, using symbols as-is: %s", exc)
+                return symbol
+
+        markets = getattr(self.exchange, "markets", {}) or {}
+        resolved = symbol
+        if symbol not in markets and ":" not in symbol and "/" in symbol:
+            quote = symbol.split("/")[-1]
+            alt = f"{symbol}:{quote}"
+            if alt in markets:
+                resolved = alt
+        self._symbol_cache[symbol] = resolved
+        if resolved != symbol:
+            log.info("Resolved symbol %s -> %s for %s", symbol, resolved, self.exchange_id)
+        return resolved
 
     # --- retry wrapper ---
     def _with_retry(self, fn, *args, **kwargs):
@@ -71,6 +103,7 @@ class CCXTProvider(DataProvider):
         limit: int = 1000,
     ) -> pd.DataFrame:
         tf_ms = timeframe_ms(timeframe)
+        symbol = self._resolve_symbol(symbol)
         rows: list[list] = []
         cursor = since
         # paginate until we reach `limit` or run out of data

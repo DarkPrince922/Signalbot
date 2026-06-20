@@ -11,6 +11,7 @@ This is decision support, not financial advice — execution stays with the user
 """
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass, field
 
 import pandas as pd
@@ -19,6 +20,8 @@ from ..core.config import AppConfig
 from ..core.types import SignalDirection
 from ..data.provider import DataProvider
 from ..strategies.indicators import atr, ema, macd, rsi, supertrend
+
+log = logging.getLogger(__name__)
 
 
 @dataclass
@@ -81,15 +84,30 @@ class Analyzer:
         return self.analyze_df(df, symbol, tf)
 
     def scan(self, pairs: list[str], timeframe: str | None = None) -> list[Analysis]:
+        analyses, _ = self.scan_detailed(pairs, timeframe)
+        return analyses
+
+    def scan_detailed(
+        self, pairs: list[str], timeframe: str | None = None
+    ) -> tuple[list[Analysis], list[str]]:
+        """Like scan() but also returns per-pair error strings for diagnostics.
+
+        Errors are no longer swallowed silently — they are logged and returned so
+        the caller can tell the user *why* a scan came back empty (e.g. exchange
+        unreachable or a bad symbol) instead of a blank 'no data'.
+        """
         out: list[Analysis] = []
+        errors: list[str] = []
         for sym in pairs:
             try:
                 out.append(self.analyze_pair(sym, timeframe))
-            except Exception:
-                continue
+            except Exception as exc:
+                msg = f"{sym}: {type(exc).__name__}: {exc}"
+                log.warning("analyze failed for %s", msg)
+                errors.append(msg)
         # actionable first, then by score desc
         out.sort(key=lambda a: (a.is_actionable, a.score), reverse=True)
-        return out
+        return out, errors
 
     # --- pure core (testable without network) ---
     def analyze_df(self, df: pd.DataFrame, symbol: str, timeframe: str) -> Analysis:

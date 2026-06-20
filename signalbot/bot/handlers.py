@@ -246,16 +246,34 @@ def build_router(ctx: BotContext) -> Router:
 
     # ---------------- Analysis / "where to enter now" ----------------
 
-    async def _do_scan() -> tuple[str, list[Analysis]]:
+    def _no_data_message(errors: list[str], pairs: list[str]) -> str:
+        lines = ["⚠️ Нет данных для анализа — не удалось получить котировки."]
+        if errors:
+            lines.append("\nПричины (первые):")
+            lines.extend(f"• {e}" for e in errors[:3])
+        lines += [
+            "",
+            "Что проверить:",
+            f"• доступ к бирже {ctx.config.data.exchange_id} с этого сервера "
+            "(Binance часто блокирует облачные/региональные IP — нужен VPN/прокси "
+            "или другая биржа);",
+            "• EXCHANGE_ID в .env (например, bybit / okx / gateio);",
+            f"• формат пар: {', '.join(pairs[:4])}… — для фьючерсов символ "
+            "приводится к виду BASE/QUOTE:QUOTE автоматически, но монета должна "
+            "торговаться на выбранной бирже.",
+        ]
+        return "\n".join(lines)
+
+    def _do_scan() -> tuple[str, list[Analysis], list[str], list[str]]:
         pairs = ctx.engine.pairs()
         tf = ctx.config.analysis.timeframe
-        analyses = ctx.analyzer.scan(pairs, tf)
+        analyses, errors = ctx.analyzer.scan_detailed(pairs, tf)
         actionable = [a for a in analyses if a.is_actionable]
         header = (
             f"🔎 Анализ {tf} · {len(pairs)} пар · с перевесом: {len(actionable)}\n"
             "Выбери пару, чтобы увидеть план и риск:"
         )
-        return header, analyses
+        return header, analyses, errors, pairs
 
     @router.message(Command("scan"))
     async def cmd_scan(message: Message, command: CommandObject) -> None:
@@ -263,9 +281,9 @@ def build_router(ctx: BotContext) -> Router:
         if tf:
             ctx.config.analysis.timeframe = tf
         await message.answer("⏳ Анализирую рынок...")
-        header, analyses = await _do_scan()
+        header, analyses, errors, pairs = _do_scan()
         if not analyses:
-            await message.answer("Нет данных для анализа.")
+            await message.answer(_no_data_message(errors, pairs))
             return
         await message.answer(header, reply_markup=kb.scan_results(analyses))
 
@@ -273,13 +291,24 @@ def build_router(ctx: BotContext) -> Router:
     async def cmd_market(message: Message, command: CommandObject) -> None:
         tf = (command.args or "").strip() or ctx.config.analysis.timeframe
         await message.answer("⏳ Оцениваю динамику рынка...")
-        ov = ctx.analyzer.market_overview(tf)
+        pairs = ctx.analyzer.universe(ctx.engine.pairs())
+        analyses, errors = ctx.analyzer.scan_detailed(pairs, tf)
+        if not analyses:
+            await message.answer(_no_data_message(errors, pairs))
+            return
+        ov = ctx.analyzer.aggregate_overview(analyses, tf)
         await message.answer(format_market_overview(ov), reply_markup=kb.market_overview_kb())
 
     @router.callback_query(F.data == kb.CB_MARKET)
     async def cb_market(cb: CallbackQuery) -> None:
         await cb.answer("Оцениваю рынок...")
-        ov = ctx.analyzer.market_overview(ctx.config.analysis.timeframe)
+        tf = ctx.config.analysis.timeframe
+        pairs = ctx.analyzer.universe(ctx.engine.pairs())
+        analyses, errors = ctx.analyzer.scan_detailed(pairs, tf)
+        if not analyses:
+            await cb.message.edit_text(_no_data_message(errors, pairs), reply_markup=kb.main_menu())
+            return
+        ov = ctx.analyzer.aggregate_overview(analyses, tf)
         await cb.message.edit_text(
             format_market_overview(ov), reply_markup=kb.market_overview_kb()
         )
@@ -292,9 +321,11 @@ def build_router(ctx: BotContext) -> Router:
     @router.callback_query(F.data == kb.CB_SCAN)
     async def cb_scan(cb: CallbackQuery) -> None:
         await cb.answer("Анализирую...")
-        header, analyses = await _do_scan()
+        header, analyses, errors, pairs = _do_scan()
         if not analyses:
-            await cb.message.edit_text("Нет данных для анализа.", reply_markup=kb.main_menu())
+            await cb.message.edit_text(
+                _no_data_message(errors, pairs), reply_markup=kb.main_menu()
+            )
             return
         await cb.message.edit_text(header, reply_markup=kb.scan_results(analyses))
 
