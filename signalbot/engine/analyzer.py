@@ -38,10 +38,32 @@ class Analysis:
     risk_usdt: float = 0.0
     rr: float | None = None
     votes: dict = field(default_factory=dict)
+    # --- movement dynamics ---
+    change_pct: float = 0.0             # % change over the lookback window
+    momentum: str = "FLAT"             # STRONG_UP | UP | FLAT | DOWN | STRONG_DOWN
 
     @property
     def is_actionable(self) -> bool:
         return self.direction is not None and self.score > 0.0
+
+
+@dataclass
+class MarketOverview:
+    """Aggregate read on the crypto market as a whole, not a single pair."""
+
+    timeframe: str
+    pairs: int = 0
+    bullish: int = 0
+    bearish: int = 0
+    neutral: int = 0
+    breadth_pct: float = 0.0           # % of universe in an uptrend
+    avg_change_pct: float = 0.0        # mean % move over the lookback window
+    avg_atr_pct: float = 0.0           # mean volatility across the universe
+    regime: str = "—"                 # RISK-ON | RISK-OFF | MIXED
+    volatility: str = "—"             # CALM | NORMAL | TURBULENT
+    btc: "Analysis | None" = None      # bellwether
+    leaders: list = field(default_factory=list)   # top movers (Analysis)
+    laggards: list = field(default_factory=list)   # bottom movers (Analysis)
 
 
 class Analyzer:
@@ -77,6 +99,15 @@ class Analyzer:
             return result
 
         close = float(df["close"].iloc[-1])
+
+        # --- movement dynamics (computed even for neutral reads) ---
+        lookback = min(c.lookback_bars, len(df) - 1)
+        if lookback > 0:
+            past = float(df["close"].iloc[-1 - lookback])
+            if past > 0:
+                result.change_pct = (close / past - 1.0) * 100.0
+        result.momentum = self._momentum_label(result.change_pct)
+
         fast = ema(df["close"], c.fast_ema).iloc[-1]
         slow = ema(df["close"], c.slow_ema).iloc[-1]
         r = rsi(df["close"], c.rsi_period).iloc[-1]
@@ -143,6 +174,69 @@ class Analyzer:
         result.qty = qty
         result.rr = rr
         return result
+
+    # --- market dynamics / overview ---
+    def universe(self, fallback_pairs: list[str] | None = None) -> list[str]:
+        if self.cfg.universe:
+            return list(self.cfg.universe)
+        return list(fallback_pairs or self.config.pairs)
+
+    def market_overview(
+        self, timeframe: str | None = None, pairs: list[str] | None = None
+    ) -> MarketOverview:
+        tf = timeframe or self.cfg.timeframe
+        analyses = self.scan(self.universe(pairs), tf)
+        return self.aggregate_overview(analyses, tf)
+
+    def aggregate_overview(self, analyses: list[Analysis], timeframe: str) -> MarketOverview:
+        c = self.cfg
+        ov = MarketOverview(timeframe=timeframe, pairs=len(analyses))
+        if not analyses:
+            return ov
+
+        from ..core.types import SignalDirection as _D
+
+        ov.bullish = sum(1 for a in analyses if a.direction == _D.LONG)
+        ov.bearish = sum(1 for a in analyses if a.direction == _D.SHORT)
+        ov.neutral = sum(1 for a in analyses if a.direction is None)
+        ov.breadth_pct = ov.bullish / ov.pairs * 100.0
+        ov.avg_change_pct = sum(a.change_pct for a in analyses) / ov.pairs
+        ov.avg_atr_pct = sum(a.atr_pct for a in analyses) / ov.pairs
+
+        # market regime from breadth + average drift
+        if ov.breadth_pct >= c.breadth_bull_pct and ov.avg_change_pct > 0:
+            ov.regime = "RISK-ON"
+        elif ov.breadth_pct <= c.breadth_bear_pct and ov.avg_change_pct < 0:
+            ov.regime = "RISK-OFF"
+        else:
+            ov.regime = "MIXED"
+
+        # volatility regime from average ATR%
+        if ov.avg_atr_pct >= c.vol_high_pct:
+            ov.volatility = "TURBULENT"
+        elif ov.avg_atr_pct >= c.vol_low_pct:
+            ov.volatility = "NORMAL"
+        else:
+            ov.volatility = "CALM"
+
+        ov.btc = next((a for a in analyses if a.symbol.upper().startswith("BTC")), None)
+
+        by_change = sorted(analyses, key=lambda a: a.change_pct, reverse=True)
+        ov.leaders = by_change[:3]
+        ov.laggards = [a for a in by_change[-3:] if a not in by_change[:3]][::-1]
+        return ov
+
+    def _momentum_label(self, change_pct: float) -> str:
+        c = self.cfg
+        if change_pct >= c.momentum_strong_pct:
+            return "STRONG_UP"
+        if change_pct >= c.momentum_flat_pct:
+            return "UP"
+        if change_pct <= -c.momentum_strong_pct:
+            return "STRONG_DOWN"
+        if change_pct <= -c.momentum_flat_pct:
+            return "DOWN"
+        return "FLAT"
 
     # --- helpers ---
     def _live_winrate(self) -> float | None:

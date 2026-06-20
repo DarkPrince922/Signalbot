@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from ..core.config import AppConfig
 from ..core.types import Signal, SignalDirection
-from ..engine.analyzer import Analysis
+from ..engine.analyzer import Analysis, MarketOverview
 from ..engine.backtester import BacktestResult
 from ..engine.metrics import Metrics
 
@@ -13,6 +13,25 @@ _VOTE_LABEL = {
     "macd": "MACD",
     "rsi": "RSI",
     "supertrend": "Supertrend",
+}
+_MOMENTUM_LABEL = {
+    "STRONG_UP": "🚀 сильный рост",
+    "UP": "📈 рост",
+    "FLAT": "➡️ боковик",
+    "DOWN": "📉 снижение",
+    "STRONG_DOWN": "🔻 сильное падение",
+}
+_REGIME_LABEL = {
+    "RISK-ON": "🟢 RISK-ON (аппетит к риску)",
+    "RISK-OFF": "🔴 RISK-OFF (уход от риска)",
+    "MIXED": "🟡 MIXED (разнонаправленно)",
+    "—": "—",
+}
+_VOL_LABEL = {
+    "CALM": "🟩 спокойная",
+    "NORMAL": "🟨 обычная",
+    "TURBULENT": "🟥 турбулентная",
+    "—": "—",
 }
 
 
@@ -114,6 +133,7 @@ def format_analysis(a: Analysis, config: AppConfig) -> str:
     lines = [
         f"{arrow}  {a.symbol}  ({a.timeframe})  — анализ сейчас",
         f"Согласованность сигналов: {int(a.score * 100)}%",
+        f"Динамика: {_MOMENTUM_LABEL.get(a.momentum, a.momentum)} ({a.change_pct:+.1f}% за окно)",
         f"Индикаторы: {agree}",
         "",
         f"Вход:   {_fmt_price(a.entry)}",
@@ -129,4 +149,39 @@ def format_analysis(a: Analysis, config: AppConfig) -> str:
         "",
         "⚠️ Это подсказка, не финансовый совет. Исполняешь сам.",
     ]
+    return "\n".join(lines)
+
+
+def _mover_line(a: Analysis) -> str:
+    return f"  {a.symbol}: {a.change_pct:+.1f}%  {_MOMENTUM_LABEL.get(a.momentum, '')}"
+
+
+def format_market_overview(ov: MarketOverview) -> str:
+    if ov.pairs == 0:
+        return "Нет данных для оценки рынка."
+
+    lines = [
+        f"🌐 Динамика крипторынка ({ov.timeframe}) — {ov.pairs} монет",
+        "",
+        f"Режим: {_REGIME_LABEL.get(ov.regime, ov.regime)}",
+        f"Волатильность: {_VOL_LABEL.get(ov.volatility, ov.volatility)} "
+        f"(ср. ATR {ov.avg_atr_pct:.2f}%)",
+        f"Ширина рынка: {ov.breadth_pct:.0f}% в аптренде "
+        f"(🟢{ov.bullish} / 🔴{ov.bearish} / ⚪{ov.neutral})",
+        f"Средн. движение за окно: {ov.avg_change_pct:+.1f}%",
+    ]
+    if ov.btc is not None:
+        lines.append(
+            f"BTC (ориентир): {_MOMENTUM_LABEL.get(ov.btc.momentum, ov.btc.momentum)} "
+            f"({ov.btc.change_pct:+.1f}%)"
+        )
+    if ov.leaders:
+        lines.append("")
+        lines.append("📈 Лидеры:")
+        lines.extend(_mover_line(a) for a in ov.leaders)
+    if ov.laggards:
+        lines.append("📉 Аутсайдеры:")
+        lines.extend(_mover_line(a) for a in ov.laggards)
+    lines.append("")
+    lines.append("⚠️ Это обзор для контекста, не финансовый совет.")
     return "\n".join(lines)

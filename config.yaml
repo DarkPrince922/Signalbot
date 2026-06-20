@@ -56,6 +56,13 @@ analysis:
   size_factor_low: 1.0   # position size multipliers the bot applies by risk
   size_factor_medium: 0.6
   size_factor_high: 0.3
+  # market dynamics / overview: broader universe to judge the market "in general"
+  universe: [BTC/USDT, ETH/USDT, SOL/USDT, BNB/USDT, XRP/USDT, ADA/USDT, DOGE/USDT, AVAX/USDT]
+  lookback_bars: 24
+  momentum_flat_pct: 1.0
+  momentum_strong_pct: 5.0
+  breadth_bull_pct: 60.0
+  breadth_bear_pct: 40.0
 
 backtest:
   oos_split: 0.7

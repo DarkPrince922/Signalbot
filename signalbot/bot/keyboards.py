@@ -8,6 +8,7 @@ from ..engine.analyzer import Analysis
 
 # callback_data prefixes
 CB_SCAN = "scan"
+CB_MARKET = "market"
 CB_PICK = "pick"      # pick:<symbol>:<tf>
 CB_TRACK = "track"    # track:<symbol>:<tf>
 CB_OPEN = "open"
@@ -19,12 +20,25 @@ CB_MENU = "menu"
 def main_menu() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
-            [InlineKeyboardButton(text="🔎 Анализ сейчас", callback_data=CB_SCAN)],
+            [InlineKeyboardButton(text="🌐 Рынок в целом", callback_data=CB_MARKET)],
+            [InlineKeyboardButton(text="🔎 Анализ пар", callback_data=CB_SCAN)],
             [
                 InlineKeyboardButton(text="📂 Открытые", callback_data=CB_OPEN),
                 InlineKeyboardButton(text="📈 Stats", callback_data=CB_STATS),
             ],
             [InlineKeyboardButton(text="⚙️ Стратегии", callback_data=CB_STRATS)],
+        ]
+    )
+
+
+def market_overview_kb() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(text="🔄 Обновить", callback_data=CB_MARKET),
+                InlineKeyboardButton(text="🔎 Анализ пар", callback_data=CB_SCAN),
+            ],
+            [InlineKeyboardButton(text="🏠 Меню", callback_data=CB_MENU)],
         ]
     )
 
