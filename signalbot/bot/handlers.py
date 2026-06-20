@@ -22,7 +22,13 @@ from ..engine.plotting import equity_curve_png
 from ..engine.tracker import Tracker
 from ..strategies.registry import build_strategy, discover_strategies
 from . import keyboards as kb
-from .formatters import format_analysis, format_backtest, format_metrics, format_signal
+from .formatters import (
+    format_analysis,
+    format_backtest,
+    format_market_overview,
+    format_metrics,
+    format_signal,
+)
 
 log = logging.getLogger(__name__)
 
@@ -48,7 +54,8 @@ HELP_TEXT = (
     "/last [N] — последние сигналы\n"
     "/open — открытые отслеживаемые сигналы\n"
     "/menu — кнопки управления\n"
-    "/scan [tf] — проанализировать рынок прямо сейчас\n\n"
+    "/scan [tf] — проанализировать пары прямо сейчас\n"
+    "/market [tf] — динамика крипторынка в целом\n\n"
     "⚠️ Это анализ, а не финансовый совет."
 )
 
@@ -261,6 +268,21 @@ def build_router(ctx: BotContext) -> Router:
             await message.answer("Нет данных для анализа.")
             return
         await message.answer(header, reply_markup=kb.scan_results(analyses))
+
+    @router.message(Command("market"))
+    async def cmd_market(message: Message, command: CommandObject) -> None:
+        tf = (command.args or "").strip() or ctx.config.analysis.timeframe
+        await message.answer("⏳ Оцениваю динамику рынка...")
+        ov = ctx.analyzer.market_overview(tf)
+        await message.answer(format_market_overview(ov), reply_markup=kb.market_overview_kb())
+
+    @router.callback_query(F.data == kb.CB_MARKET)
+    async def cb_market(cb: CallbackQuery) -> None:
+        await cb.answer("Оцениваю рынок...")
+        ov = ctx.analyzer.market_overview(ctx.config.analysis.timeframe)
+        await cb.message.edit_text(
+            format_market_overview(ov), reply_markup=kb.market_overview_kb()
+        )
 
     @router.callback_query(F.data == kb.CB_MENU)
     async def cb_menu(cb: CallbackQuery) -> None:

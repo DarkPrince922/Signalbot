@@ -77,6 +77,15 @@ class AnalysisConfig(BaseModel):
     size_factor_low: float = 1.0
     size_factor_medium: float = 0.6
     size_factor_high: float = 0.3
+    # --- market dynamics / overview ---
+    # broader universe used to judge "the crypto market in general" (not just the
+    # tracked pairs); empty -> fall back to the configured `pairs`.
+    universe: list[str] = Field(default_factory=list)
+    lookback_bars: int = 24                  # window for % change / momentum
+    momentum_flat_pct: float = 1.0           # |change| below this == flat
+    momentum_strong_pct: float = 5.0         # |change| above this == strong move
+    breadth_bull_pct: float = 60.0           # % bullish to call the market risk-on
+    breadth_bear_pct: float = 40.0           # % bullish below this == risk-off
 
 
 class LoggingConfig(BaseModel):
