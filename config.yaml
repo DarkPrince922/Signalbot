@@ -28,6 +28,18 @@ strategies:
     enabled: false
     timeframe: 4h
     params: {channel: 20, atr_period: 14, atr_mult: 3.0, rr: 2.0}
+  macd_cross:
+    enabled: false
+    timeframe: 1h
+    params: {fast: 12, slow: 26, signal: 9, atr_period: 14, atr_mult: 2.0, rr: 2.0}
+  bollinger_reversion:
+    enabled: false
+    timeframe: 1h
+    params: {period: 20, num_std: 2.0, atr_period: 14, atr_mult: 1.5, rr: 1.5, trend_ema: 0}
+  supertrend:
+    enabled: false
+    timeframe: 4h
+    params: {period: 10, multiplier: 3.0, rr: 2.0}
 
 backtest:
   oos_split: 0.7
