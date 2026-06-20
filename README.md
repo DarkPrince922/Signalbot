@@ -26,7 +26,7 @@
 signalbot/
 ├── core/      config, models, db, types
 ├── data/      DataProvider + ccxt-реализация с кэшем
-├── strategies/ base + ema_cross/rsi_reversion/donchian_breakout + registry + indicators
+├── strategies/ base + 6 стратегий + registry + indicators
 ├── engine/    backtester, metrics, live_engine, tracker, plotting
 └── bot/       aiogram main, handlers, formatters
 ```
@@ -35,6 +35,21 @@ signalbot/
 чтобы не тянуть бинарную зависимость pandas-ta и оставаться совместимыми с
 современными версиями numpy. Все они причинные (causal) — значение на свече `i`
 не зависит от будущих свечей.
+
+### Стартовые стратегии
+
+Все они — **болванки для проверки механики, не торговые рекомендации**.
+Параметры тюнятся в `config.yaml`, каждая включается/выключается там же или
+из бота. По умолчанию включены только `ema_cross` и `rsi_reversion`.
+
+| Стратегия | Идея |
+|---|---|
+| `ema_cross` | пересечение быстрой/медленной EMA, стоп по ATR, тейк по R |
+| `rsi_reversion` | возврат RSI из зоны перекупленности/перепроданности + фильтр тренда |
+| `donchian_breakout` | пробой N-периодного канала Дончиана, трейл по ATR |
+| `macd_cross` | пересечение линии MACD и сигнальной, стоп по ATR |
+| `bollinger_reversion` | возврат цены внутрь полос Боллинджера (mean-reversion), тейк к средней |
+| `supertrend` | вход на смене направления Supertrend, стоп по линии индикатора |
 
 ## Установка и запуск
 
